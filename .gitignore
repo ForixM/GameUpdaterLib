@@ -1,0 +1,5 @@
+GameUpdaterLib.iml
+GameUpdaterLib.ipr
+GameUpdaterLib.iws
+# Project exclude paths
+/out/
