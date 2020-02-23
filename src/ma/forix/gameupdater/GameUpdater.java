@@ -1,6 +1,6 @@
 package ma.forix.gameupdater;
 
-import java.io.File;
+import java.io.*;
 
 public class GameUpdater {
 
@@ -9,17 +9,39 @@ public class GameUpdater {
 
     private Downloader downloader;
 
+    public static void main(String[] args) {
+        new GameUpdater("http://foxlauncher.yj.fr/GameUpdater/", new File(System.getProperty("user.home")+"\\AppData\\Roaming\\.Atest"));
+    }
+
     public GameUpdater(String url, File gameDir){
         this.url = url;
         this.gameDir = gameDir;
         downloader = new Downloader(url, gameDir);
+        downloader.Suppresser();
+        start();
     }
 
     public void start(){
+        downloader.start();
+    }
 
+    public int getDownloadSize(){
+        return downloader.getDownloadSize();
+    }
+
+    public int getFilesToDownload(){
+        return downloader.getFilesToDownload();
+    }
+
+    public int getFilesDownloaded(){
+        return downloader.getFileDownloaded();
+    }
+
+    public int getBytesDownloaded(){
+        return downloader.getBytesDownloaded();
     }
 
     public void interrupt(){
-
+        downloader.interrupt();
     }
 }
