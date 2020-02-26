@@ -1,6 +1,10 @@
 package ma.forix.gameupdater;
 
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
 import org.apache.commons.io.FileUtils;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -8,8 +12,8 @@ import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 
 import java.io.*;
+import java.net.Socket;
 import java.net.URL;
-import java.util.ArrayList;
 
 public class Downloader extends Thread implements Runnable {
 
@@ -20,19 +24,52 @@ public class Downloader extends Thread implements Runnable {
     private int downloadSize, bytesDownloaded, fileDownloaded, filesToDownload, threadsNumber;
     private final int SIMULTANEOUS = 20;
     private String[] ignoreFiles;
+    private BufferedInputStream reader;
+
+    private void getContent(){
+        try {
+            Socket socket = new Socket("v1.modcraftmc.fr", 25666);
+            PrintWriter writer = new PrintWriter(socket.getOutputStream());
+            reader = new BufferedInputStream(socket.getInputStream());
+            String reponse = null;
+            jsonArray = new JSONArray();
+
+            writer.write("getContent");
+            writer.flush();
+            reponse = read();
+            System.out.println("ouais: "+reponse);
+            try (InputStreamReader streamReader = new InputStreamReader(new URL(this.url+"/content.json").openStream())){
+                Object obj = new JSONParser().parse(streamReader);
+                jsonArray = (JSONArray) obj;
+            } catch (ParseException | IOException e) {
+                e.printStackTrace();
+            }
+            System.out.println("Receiving finished");
+            writer.write("close");
+            writer.flush();
+            socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private String read() throws IOException{
+        String response = "";
+        int stream;
+        byte[] b = new byte[1024];
+        stream = reader.read();
+        response = new String(b, 0, stream);
+        return response;
+    }
 
     public Downloader(String url, File gameDir){
         if (url.toCharArray()[url.toCharArray().length-1] == '/'){
             this.url = UrlAdapter(url);
         }
         this.gameDir = gameDir;
-        try (InputStreamReader streamReader = new InputStreamReader(new URL(this.url+"/content.json").openStream())){
-            Object obj = new JSONParser().parse(streamReader);
-            jsonArray = (JSONArray) obj;
-        } catch (ParseException | IOException e) {
-            e.printStackTrace();
-        }
-
+        if (!gameDir.exists())
+            gameDir.mkdir();
+        getContent();
         try(InputStreamReader streamReader = new InputStreamReader(new URL(this.url+"/ignore.txt").openStream())){
             int data = streamReader.read();
             StringBuilder reading = new StringBuilder();
@@ -134,7 +171,7 @@ public class Downloader extends Thread implements Runnable {
         }
         System.out.println("[VERIFICATION] temps écoulé vérif: "+(System.currentTimeMillis()-temp));
         System.out.println("[VERIFICATION] Download size: "+GetDownloadSize(toDownload)/1024+"Ko");
-        System.out.println("[VERIFICATION] Files to download: "+i);
+        System.out.println("[VERIFICATION] Files to download: "+filesToDownload);
     }
 
     @Override
@@ -158,7 +195,7 @@ public class Downloader extends Thread implements Runnable {
         }
         boolean finish = false;
         while (!finish){
-            if (threadsNumber <= 0){
+            if (fileDownloaded >= filesToDownload){
                 finish = true;
             } else
                 finish = false;
@@ -181,20 +218,18 @@ public class Downloader extends Thread implements Runnable {
                 threadsNumber++;
                 BufferedInputStream bis = new BufferedInputStream(new URL(url + "/downloads/" + path.replace("\\", "/").replaceAll(" ", "%20") + fileName.replaceAll(" ", "%20")).openStream());
                 FileOutputStream fos = new FileOutputStream(writer);
-                System.out.println("Téléchargement du fichier: " + cursor.getAbsoluteFile().toString());
-                System.out.println("Threads restant: "+threadsNumber);
-                final byte data[] = new byte[64];
+                final byte data[] = new byte[32];
                 int count;
 
-                while ((count = bis.read(data, 0, 64)) != -1) {
+                while ((count = bis.read(data, 0, 32)) != -1) {
                     bytesDownloaded += count;
                     fos.write(data, 0, count);
                 }
                 threadsNumber--;
-                bis.close();
-                fos.close();
                 fileDownloaded++;
-                System.out.println("Threads restant: "+threadsNumber);
+                System.out.println("Fichiers téléchargés: "+fileDownloaded);
+                bis.close();
+                fos.flush();
             } catch (IOException e) {
                 e.printStackTrace();
             }

@@ -9,8 +9,10 @@ public class GameUpdater {
 
     private Downloader downloader;
 
+    private static BufferedInputStream reader;
+
     public static void main(String[] args) {
-        new GameUpdater("http://foxlauncher.yj.fr/GameUpdater/", new File(System.getProperty("user.home")+"\\AppData\\Roaming\\.Atest"));
+        new GameUpdater("http://v1.modcraftmc.fr:100/gameupdater/", new File(System.getProperty("user.home")+"\\AppData\\Roaming\\.Atest"));
     }
 
     public GameUpdater(String url, File gameDir){
