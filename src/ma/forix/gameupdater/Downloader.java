@@ -1,10 +1,6 @@
 package ma.forix.gameupdater;
 
-
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
+import javafx.concurrent.Task;
 import org.apache.commons.io.FileUtils;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -14,8 +10,10 @@ import org.json.simple.parser.ParseException;
 import java.io.*;
 import java.net.Socket;
 import java.net.URL;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
-public class Downloader extends Thread implements Runnable {
+public class Downloader extends Task<Void> {
 
     private String url;
     private File gameDir;
@@ -25,10 +23,12 @@ public class Downloader extends Thread implements Runnable {
     private final int SIMULTANEOUS = 20;
     private String[] ignoreFiles;
     private BufferedInputStream reader;
+    private Thread updateBar;
+    private Os os;
 
     private void getContent(){
         try {
-            Socket socket = new Socket("v1.modcraftmc.fr", 25666);
+            Socket socket = new Socket("v1.modcraftmc.fr", 25667);
             PrintWriter writer = new PrintWriter(socket.getOutputStream());
             reader = new BufferedInputStream(socket.getInputStream());
             String reponse = null;
@@ -37,14 +37,13 @@ public class Downloader extends Thread implements Runnable {
             writer.write("getContent");
             writer.flush();
             reponse = read();
-            System.out.println("ouais: "+reponse);
             try (InputStreamReader streamReader = new InputStreamReader(new URL(this.url+"/content.json").openStream())){
                 Object obj = new JSONParser().parse(streamReader);
                 jsonArray = (JSONArray) obj;
             } catch (ParseException | IOException e) {
                 e.printStackTrace();
             }
-            System.out.println("Receiving finished");
+            System.out.println("content.json recovered");
             writer.write("close");
             writer.flush();
             socket.close();
@@ -63,6 +62,12 @@ public class Downloader extends Thread implements Runnable {
     }
 
     public Downloader(String url, File gameDir){
+        System.out.println("OS: "+System.getProperty("os.name"));
+        if (System.getProperty("os.name").contains("Windows"))
+            os = Os.WINDAUBE;
+        else
+            os = Os.UNIX;
+
         if (url.toCharArray()[url.toCharArray().length-1] == '/'){
             this.url = UrlAdapter(url);
         }
@@ -83,7 +88,15 @@ public class Downloader extends Thread implements Runnable {
                     writing = true;
                 data = streamReader.read();
             }
-            ignoreFiles = reading.toString().split("\r");
+            if (reading.toString().contains("\r"))
+                ignoreFiles = reading.toString().split("\r");
+            else
+                ignoreFiles = reading.toString().split("\n");
+            System.out.print("[");
+            for (String current : ignoreFiles){
+                System.out.print("\""+current+"\", ");
+            }
+            System.out.println("]");
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -97,6 +110,8 @@ public class Downloader extends Thread implements Runnable {
         return sb.toString();
     }
 
+
+
     public int GetDownloadSize(JSONArray toDownload){
         File cursor;
         for (Object array : jsonArray){
@@ -107,46 +122,75 @@ public class Downloader extends Thread implements Runnable {
         return downloadSize;
     }
 
-    public int getDownloadSize(){
-        return  downloadSize;
-    }
-
-    public int getFilesToDownload(){
-        return filesToDownload;
-    }
-
-    public int getFileDownloaded(){
-        return fileDownloaded;
-    }
-
-    public int getBytesDownloaded(){
-        return bytesDownloaded;
-    }
-
     public void Suppresser(){
         File[] listing = FileUtils.listFiles(gameDir, null, true).toArray(new File[0]);
         long temp = System.currentTimeMillis();
 
         for (File current : listing){
-            boolean exist = false;
-            for (Object array: jsonArray){
-                object = (JSONObject) array;
-                if (current.getName().equals(object.get("filename").toString()))
-                    exist = true;
+            boolean ignore = false;
+            //Use MD5 algorithm
+            MessageDigest md5Digest = null;
+            try {
+                md5Digest = MessageDigest.getInstance("MD5");
+                //Get the checksum
+                String checksum = getFileChecksum(md5Digest, current);
+                for (Object array: jsonArray){
+                    object = (JSONObject) array;
+                    if (checksum.equals(object.get("md5").toString()))
+                        ignore = true;
+                }
+            } catch (NoSuchAlgorithmException | IOException e) {
+                e.printStackTrace();
             }
-            for (String now : ignoreFiles){
-                File tempo = new File(gameDir+now.replace("/", "\\"));
-                if (current.toString().contains(now.replace("/", "\\"))) {
-                    System.out.println("[IGNORE LIST] C'est dans la ignore ! " + current.getName());
-                    exist = true;
+            if (ignoreFiles.length > 0) {
+                if (ignoreFiles.length == 2 && ignoreFiles[0].equals("")) {
+                    for (String now : ignoreFiles) {
+                        if (current.toString().contains(now.replace("/", "\\"))) {
+                            System.out.println("[IGNORE LIST] This file is ignored: " + current.getName());
+                            ignore = true;
+                        }
+                    }
                 }
             }
-            if (!exist) {
+            if (!ignore) {
+                System.out.println("[IGNORE LIST] Fichier '"+current+"' supprimé");
                 current.delete();
             }
         }
 
         System.out.println("[IGNORE LIST] time elapsed for deleting unecessary files: "+(System.currentTimeMillis()-temp));
+    }
+
+    private static String getFileChecksum(MessageDigest digest, File file) throws IOException
+    {
+        //Get file input stream for reading the file content
+        FileInputStream fis = new FileInputStream(file);
+
+        //Create byte array to read data in chunks
+        byte[] byteArray = new byte[1024];
+        int bytesCount = 0;
+
+        //Read file data and update in message digest
+        while ((bytesCount = fis.read(byteArray)) != -1) {
+            digest.update(byteArray, 0, bytesCount);
+        };
+
+        //close the stream; We don't need it now.
+        fis.close();
+
+        //Get the hash's bytes
+        byte[] bytes = digest.digest();
+
+        //This bytes[] has bytes in decimal format;
+        //Convert it to hexadecimal format
+        StringBuilder sb = new StringBuilder();
+        for(int i=0; i< bytes.length ;i++)
+        {
+            sb.append(Integer.toString((bytes[i] & 0xff) + 0x100, 16).substring(1));
+        }
+
+        //return complete hash
+        return sb.toString();
     }
 
     private void Verification(){
@@ -174,41 +218,6 @@ public class Downloader extends Thread implements Runnable {
         System.out.println("[VERIFICATION] Files to download: "+filesToDownload);
     }
 
-    @Override
-    public void run() {
-        File cursor;
-        super.run();
-        Verification();
-        threadsNumber = 0;
-        long time = System.currentTimeMillis()/1000;
-        for (Object array : toDownload){
-            object = (JSONObject) array;
-            cursor = new File(gameDir.toString() + "\\" + object.get("path").toString() + object.get("filename").toString());
-            if (cursor.getParentFile().exists()) {
-                if (!cursor.exists()) {
-                    download(cursor, object);
-                }
-            } else {
-                cursor.getParentFile().mkdirs();
-                download(cursor, object);
-            }
-        }
-        boolean finish = false;
-        while (!finish){
-            if (fileDownloaded >= filesToDownload){
-                finish = true;
-            } else
-                finish = false;
-            try {
-                sleep(10);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-        System.out.println("temps: "+(System.currentTimeMillis()/1000-time)+" sec");
-        System.out.println("Process terminé !");
-    }
-
     private void download(File cursor, JSONObject obj){
         File writer = cursor;
         Thread download = new Thread(() -> {
@@ -216,18 +225,20 @@ public class Downloader extends Thread implements Runnable {
             String fileName = obj.get("filename").toString();
             try {
                 threadsNumber++;
-                BufferedInputStream bis = new BufferedInputStream(new URL(url + "/downloads/" + path.replace("\\", "/").replaceAll(" ", "%20") + fileName.replaceAll(" ", "%20")).openStream());
+                URL fileUrl = new URL(this.url+"/downloads/" + path.replace("\\", "/").replaceAll(" ", "%20") + fileName.replaceAll(" ", "%20"));
+                System.out.println("[GameUpdater] Téléchargement du fichier: "+fileUrl.toString());
+                BufferedInputStream bis = new BufferedInputStream(fileUrl.openStream());
                 FileOutputStream fos = new FileOutputStream(writer);
                 final byte data[] = new byte[32];
                 int count;
-
                 while ((count = bis.read(data, 0, 32)) != -1) {
                     bytesDownloaded += count;
+                    updateProgress(bytesDownloaded, downloadSize);
                     fos.write(data, 0, count);
                 }
                 threadsNumber--;
                 fileDownloaded++;
-                System.out.println("Fichiers téléchargés: "+fileDownloaded);
+                System.out.println("[GameUpdater] Téléchargement du fichier terminé :"+fileName);
                 bis.close();
                 fos.flush();
             } catch (IOException e) {
@@ -242,5 +253,60 @@ public class Downloader extends Thread implements Runnable {
                 e.printStackTrace();
             }
         }
+    }
+
+    private long time;
+
+    @Override
+    protected Void call() {
+        File cursor;
+        Verification();
+        threadsNumber = 0;
+        time = System.currentTimeMillis()/1000;
+
+        updateBar = new Thread(){
+            @Override
+            public void run() {
+                super.run();
+                updateProgress(bytesDownloaded, downloadSize);
+            }
+        };
+        updateBar.start();
+
+        for (Object array : toDownload){
+            object = (JSONObject) array;
+            cursor = new File(gameDir.toString() + "\\" + object.get("path").toString() + object.get("filename").toString());
+            if (cursor.getParentFile().exists()) {
+                if (!cursor.exists()) {
+                    download(cursor, object);
+                }
+            } else {
+                cursor.getParentFile().mkdirs();
+                download(cursor, object);
+            }
+        }
+        boolean finished = false;
+        while (!finished){
+            if (fileDownloaded >= filesToDownload)
+                finished = true;
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        return null;
+    }
+
+    @Override
+    protected void succeeded() {
+        System.out.println("[GameUpdater] Downloading time: "+(System.currentTimeMillis()/1000-time)+" sec");
+        System.out.println("[GameUpdater] Update finished !");
+        super.succeeded();
+    }
+
+    @Override
+    protected void cancelled() {
+        super.cancelled();
     }
 }
