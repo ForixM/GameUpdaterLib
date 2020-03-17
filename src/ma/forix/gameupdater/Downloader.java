@@ -75,10 +75,13 @@ public class Downloader extends Task<Void> {
         if (!gameDir.exists())
             gameDir.mkdir();
         getContent();
+
+
         try(InputStreamReader streamReader = new InputStreamReader(new URL(this.url+"/ignore.txt").openStream())){
             int data = streamReader.read();
             StringBuilder reading = new StringBuilder();
             boolean writing = true;
+
             while (data != -1){
                 if (writing) {
                     if (data == 13)
@@ -88,10 +91,12 @@ public class Downloader extends Task<Void> {
                     writing = true;
                 data = streamReader.read();
             }
+
             if (reading.toString().contains("\r"))
                 ignoreFiles = reading.toString().split("\r");
             else
                 ignoreFiles = reading.toString().split("\n");
+
             System.out.print("[");
             for (String current : ignoreFiles){
                 System.out.print("\""+current+"\", ");
@@ -136,20 +141,18 @@ public class Downloader extends Task<Void> {
                 String checksum = getFileChecksum(md5Digest, current);
                 for (Object array: jsonArray){
                     object = (JSONObject) array;
-                    if (checksum.equals(object.get("md5").toString()))
-                        ignore = true;
+                    if (checksum.equals(object.get("md5").toString())) {
+                        if (object.get("filename").toString().equals(current.getName()))
+                            ignore = true;
+                    }
                 }
             } catch (NoSuchAlgorithmException | IOException e) {
                 e.printStackTrace();
             }
-            if (ignoreFiles.length > 0) {
-                if (ignoreFiles.length == 2 && ignoreFiles[0].equals("")) {
-                    for (String now : ignoreFiles) {
-                        if (current.toString().contains(now.replace("/", "\\"))) {
-                            System.out.println("[IGNORE LIST] This file is ignored: " + current.getName());
-                            ignore = true;
-                        }
-                    }
+            for (String now : ignoreFiles) {
+                if (current.toString().contains(now.replace("/", "\\"))) {
+                    //System.out.println("[IGNORE LIST] This file is ignored: " + current.getName());
+                    ignore = true;
                 }
             }
             if (!ignore) {
@@ -196,12 +199,13 @@ public class Downloader extends Task<Void> {
     private void Verification(){
         filesToDownload = 0;
         File cursor;
-        int i = 0;
         toDownload = new JSONArray();
         long temp = System.currentTimeMillis();
+
         for (Object array : jsonArray){
             object = (JSONObject) array;
-            cursor = new File(gameDir.toString() + "\\" + object.get("path").toString() + object.get("filename").toString());
+            cursor = new File(gameDir.toString() + "\\" + object.get("path").toString() + object.get("filename").toString().replaceAll("#var#", ".var"));
+
             if (!cursor.exists()) {
                 toDownload.add(object);
                 filesToDownload++;
@@ -219,17 +223,16 @@ public class Downloader extends Task<Void> {
     }
 
     private void download(File cursor, JSONObject obj){
-        File writer = cursor;
         Thread download = new Thread(() -> {
             String path = obj.get("path").toString();
             String fileName = obj.get("filename").toString();
             try {
                 threadsNumber++;
-                URL fileUrl = new URL(this.url+"/downloads/" + path.replace("\\", "/").replaceAll(" ", "%20") + fileName.replaceAll(" ", "%20"));
+                URL fileUrl = new URL(this.url+"/downloads/" + path.replace("\\", "/").replaceAll(" ", "%20").replaceAll("#", "%23") + fileName.replaceAll(" ", "%20").replaceAll("#", "%23"));
                 System.out.println("[GameUpdater] Téléchargement du fichier: "+fileUrl.toString());
                 BufferedInputStream bis = new BufferedInputStream(fileUrl.openStream());
-                FileOutputStream fos = new FileOutputStream(writer);
-                final byte data[] = new byte[32];
+                FileOutputStream fos = new FileOutputStream(new File(cursor.toString().replaceAll("#var#", ".var")));
+                final byte data[] = new byte[64];
                 int count;
                 while ((count = bis.read(data, 0, 32)) != -1) {
                     bytesDownloaded += count;
@@ -285,6 +288,7 @@ public class Downloader extends Task<Void> {
                 download(cursor, object);
             }
         }
+
         boolean finished = false;
         while (!finished){
             if (fileDownloaded >= filesToDownload)
